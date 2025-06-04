@@ -1,0 +1,25 @@
+{
+  "name": "patient-support-companion",
+  "private": true,
+  "version": "0.0.1",
+  "description": "A patient support companion app using React, Vite, and TypeScript.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite", 
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.1",
+    "@react-oauth/google": "^0.12.1",
+    "jwt-decode": "^3.1.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.3.5"
+  }
+}
