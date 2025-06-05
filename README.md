@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Run and deploy your AI Studio app
 
 This contains everything you need to run your app locally.
@@ -17,3 +18,6 @@ This contains everything you need to run your app locally.
 # patient-support-companion
 A patient support companion app using React, Vite, and TypeScript.
 >>>>>>> 3ac6cd7722d294efe19206a3e0cd294de84b0ebc
+=======
+# coaching-assistant
+>>>>>>> 9c54c4322cd58e07eb58130b3bd8880376d51cdf
