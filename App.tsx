@@ -1,20 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { useGoogleLogin, googleLogout } from '@react-oauth/google';
-
-const AGENT_ID = "projects/patient-support-451116/locations/global/agents/146c6358-9456-4f3d-bd69-9eb76795eb9b";
-const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID;
-
-// Language options with Dialogflow and TTS voice codes
+const AGENT_ID = import.meta.env.VITE_AGENT_ID;
+const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const LANGUAGES = [
-  { code: 'en-US', label: 'English', ttsVoice: 'en-US-Chirp3-HD-Erinome', dialogflow: 'en' },
-  { code: 'de-DE', label: 'Deutsch', ttsVoice: 'de-DE-Chirp3-HD-Erinome', dialogflow: 'de' },
-  { code: 'fr-FR', label: 'Français', ttsVoice: 'fr-FR-Chirp3-HD-Erinome', dialogflow: 'fr' },
-  { code: 'es-ES', label: 'Español', ttsVoice: 'es-ES-Chirp3-HD-Erinome', dialogflow: 'es' },
-  { code: 'pt-BR', label: 'Português (Brasil)', ttsVoice: 'pt-BR-Chirp3-HD-Erinome', dialogflow: 'pt-BR' },
-  { code: 'cmn-CN', label: '中文 (简体)', ttsVoice: 'cmn-CN-Chirp3-HD-Erinome', dialogflow: 'zh-CN' },
+  { code: 'en-US', label: 'English', ttsVoice: 'en-US-Chirp3-HD-Leda', dialogflow: 'en' }
 ];
-
-// Utility to clean text for TTS (removes emojis and symbols)
+// Utility to clean text for TTS (removes emojis, symbols, and pause markers)
 function cleanTextForTTS(text: string) {
   return text
     .replace(/[\u{1F600}-\u{1F6FF}]/gu, '')
@@ -22,20 +13,47 @@ function cleanTextForTTS(text: string) {
     .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
     .replace(/[\u{2600}-\u{26FF}]/gu, '')
     .replace(/[\u{2700}-\u{27BF}]/gu, '')
-    .replace(/\s+/g, ' ')
+    .replace(/\[pause short\]/gi, '')
+    .replace(/\[pause\]/gi, '')
+    .replace(/[ ]{2,}/g, ' ')
+    .replace(/\s+([?.!,;:])/g, '$1')
     .trim();
 }
-
+// Language-aware, humanizing prompt enhancer (English only)
+function makePromptNatural(text: string, lang: string) {
+  let t = text.trim();
+  t = t.replace(/\bI am\b/g, "I'm")
+    .replace(/\bYou are\b/g, "You're")
+    .replace(/\bWe are\b/g, "We're")
+    .replace(/\bLet us\b/g, "Let's")
+    .replace(/\bDo not\b/g, "Don't")
+    .replace(/\bCan not\b/g, "Can't")
+    .replace(/\bWill not\b/g, "Won't")
+    .replace(/\bIt is\b/g, "It's")
+    .replace(/\bThat is\b/g, "That's")
+    .replace(/\bThere is\b/g, "There's");
+  t = t.replace(/([?])(\s|$)/g, '$1 [pause] ');
+  t = t.replace(/([!])(\s|$)/g, '$1 [pause short] ');
+  t = t.replace(/(hello|hi|hey)[,.!?]?/i, '$1...');
+  if (/\?$/.test(t) && Math.random() < 0.15) {
+    t = t.replace(/^/, "Um, ");
+  }
+  t = t.replace(/((?:\S+\s+){20,}\S+[.!?])/g, '$1 [pause]');
+  t = t.replace(/[ ]{2,}/g, ' ').replace(/\s+([?.!,;:])/g, '$1').trim();
+  return t;
+}
+// Helper to remove hyperlinks from text
+function removeLinks(text: string) {
+  return text.replace(/https?:\/\/\S+|www\.\S+/gi, '').replace(/[ ]{2,}/g, ' ').trim();
+}
 function getOrCreateSessionId() {
   const key = "psa_session_id";
   const expiryKey = "psa_session_expiry";
   const now = Date.now();
   const hours = 72;
   const expiry = now + hours * 60 * 60 * 1000;
-
   let sessionId = localStorage.getItem(key);
   let sessionExpiry = localStorage.getItem(expiryKey);
-
   if (!sessionId || !sessionExpiry || now > Number(sessionExpiry)) {
     sessionId = `user-${Math.random().toString(36).substr(2, 9)}`;
     localStorage.setItem(key, sessionId);
@@ -43,28 +61,28 @@ function getOrCreateSessionId() {
   }
   return sessionId;
 }
-
+const MAX_TTS_LENGTH = 8000;
 const App: React.FC = () => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ sender: string; text: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
-  const [language, setLanguage] = useState('en-US');
-
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const sessionIdRef = useRef(getOrCreateSessionId());
-
-  // Find the selected language/voice
-  const selectedLang = LANGUAGES.find(l => l.code === language) || LANGUAGES[0];
-
-  // Google Cloud TTS function with language/voice selection
+  const selectedLang = LANGUAGES[0];
   const speakWithGoogleTTS = async (text: string) => {
     if (!accessToken) return;
     try {
-      const cleanedText = cleanTextForTTS(text);
-      const markup = cleanedText.replace(/\.\s*/g, '. [pause] ');
+      const noLinks = removeLinks(text);
+      const naturalText = makePromptNatural(noLinks, selectedLang.code);
+      const cleanedText = cleanTextForTTS(naturalText);
+      if (cleanedText.length > MAX_TTS_LENGTH) {
+        setError("Sorry, the response is too long to read aloud.");
+        return;
+      }
+      const truncated = cleanedText.slice(0, MAX_TTS_LENGTH);
       const response = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
         method: 'POST',
         headers: {
@@ -72,10 +90,10 @@ const App: React.FC = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          input: { markup },
+          input: { text: truncated },
           voice: { languageCode: selectedLang.code, name: selectedLang.ttsVoice },
-          audioConfig: { 
-            audioEncoding: 'MP3', 
+          audioConfig: {
+            audioEncoding: 'MP3',
             speakingRate: 0.9
           }
         })
@@ -94,7 +112,6 @@ const App: React.FC = () => {
       setError('Text-to-Speech failed.');
     }
   };
-
   const login = useGoogleLogin({
     clientId,
     scope: 'https://www.googleapis.com/auth/cloud-platform',
@@ -102,29 +119,25 @@ const App: React.FC = () => {
       setAccessToken(tokenResponse.access_token);
       setError(null);
       setMessages([
-        { sender: 'agent', text: "Hello! I'm your Patient Support Cloud Agent. How can I assist you today?" }
+        { sender: 'agent', text: "Hello! I'm Iris, your Coaching Assistant. How can I support your growth today?" }
       ]);
-      speakWithGoogleTTS("Hello! I'm your Patient Support Cloud Agent. How can I assist you today?");
+      speakWithGoogleTTS("Hello! I'm Iris, your Coaching Assistant. How can I support your growth today?");
     },
     onError: () => setError("Google Sign-In failed. Please try again."),
     flow: 'implicit',
   });
-
-  // Send message to agent and speak reply
   const sendMessage = async (text: string) => {
     setMessages(prev => [...prev, { sender: 'user', text }]);
     setLoading(true);
     setError(null);
-
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-
     const sessionId = sessionIdRef.current;
     try {
       const response = await fetch(
-        `https://dialogflow.googleapis.com/v3/${AGENT_ID}/sessions/${sessionId}:detectIntent`,
+        `https://europe-west2-dialogflow.googleapis.com/v3/${AGENT_ID}/sessions/${sessionId}:detectIntent`,
         {
           method: 'POST',
           headers: {
@@ -139,26 +152,27 @@ const App: React.FC = () => {
           })
         }
       );
-      if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Dialogflow error:', errorData);
+        throw new Error(`API error: ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
       const data = await response.json();
       const agentReply = data.queryResult?.responseMessages?.[0]?.text?.text?.[0] || "Sorry, I didn't understand that.";
-      setMessages(prev => [...prev, { sender: 'agent', text: agentReply }]);
       speakWithGoogleTTS(agentReply);
+      setMessages(prev => [...prev, { sender: 'agent', text: agentReply }]);
     } catch (err: any) {
-      setMessages(prev => [...prev, { sender: 'agent', text: "Error contacting agent." }]);
+      setMessages(prev => [...prev, { sender: 'agent', text: "Error contacting Iris." }]);
       setError(err.message || "Unknown error");
     } finally {
       setLoading(false);
     }
   };
-
-  // Speech Recognition Logic
   const handleMicClick = () => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       setError('Speech recognition not supported in this browser.');
       return;
@@ -171,12 +185,10 @@ const App: React.FC = () => {
     setError(null);
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.lang = selectedLang.code; // Use the selected language for recognition
+    recognition.lang = selectedLang.code;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
-
     let finalTranscript = '';
-
     recognition.onstart = () => setListening(true);
     recognition.onresult = (event: any) => {
       finalTranscript = event.results[0][0].transcript;
@@ -199,16 +211,14 @@ const App: React.FC = () => {
         sendMessage(finalTranscript);
       }
     };
-
     recognitionRef.current = recognition;
     recognition.start();
   };
-
   if (!accessToken) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-slate-100 p-4">
         <div className="bg-slate-800 p-8 rounded-xl shadow-2xl text-center">
-          <h1 className="text-3xl font-bold text-sky-400 mb-6">Patient Support Agent</h1>
+          <h1 className="text-3xl font-bold text-sky-400 mb-6">Iris: Coaching Assistant</h1>
           <p className="text-slate-300 mb-8">Please sign in with your Google account to continue.</p>
           {error && <p className="text-red-400 mb-4">{error}</p>}
           <button
@@ -221,11 +231,10 @@ const App: React.FC = () => {
       </div>
     );
   }
-
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-slate-100">
       <div className="flex justify-between items-center p-4 bg-slate-900 shadow">
-        <h1 className="text-xl font-bold text-sky-400">Patient Support Agent</h1>
+        <h1 className="text-xl font-bold text-sky-400">Iris: Coaching Assistant</h1>
         <button
           onClick={() => { googleLogout(); setAccessToken(null); setMessages([]); }}
           className="text-slate-300 hover:text-red-400"
@@ -233,31 +242,19 @@ const App: React.FC = () => {
           Log out
         </button>
       </div>
-      <div className="p-4">
-        <label htmlFor="lang" className="mr-2 font-semibold">Language:</label>
-        <select
-          id="lang"
-          value={language}
-          onChange={e => setLanguage(e.target.value)}
-          className="p-2 rounded text-black"
-        >
-          {LANGUAGES.map(lang => (
-            <option key={lang.code} value={lang.code}>{lang.label}</option>
-          ))}
-        </select>
-      </div>
+      {/* Language dropdown removed */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, idx) => (
           <div
             key={idx}
             className={`max-w-xl mx-auto p-3 rounded-lg ${msg.sender === 'user' ? 'bg-sky-600 text-white text-right' : 'bg-slate-700 text-slate-100 text-left'}`}
           >
-            <span>{msg.text}</span>
+            <span>{msg.sender === 'agent' ? removeLinks(msg.text) : msg.text}</span>
           </div>
         ))}
         {loading && (
           <div className="max-w-xl mx-auto p-3 rounded-lg bg-slate-700 text-slate-100 text-left">
-            Agent is typing...
+            Iris is typing...
           </div>
         )}
       </div>
@@ -280,5 +277,4 @@ const App: React.FC = () => {
     </div>
   );
 };
-
 export default App;

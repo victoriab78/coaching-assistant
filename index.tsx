@@ -8,7 +8,6 @@ if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
-// Use Vite environment variable for Google OAuth Client ID
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 const root = ReactDOM.createRoot(rootElement);
